@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Xml;
 using System.Text;
+using System.Drawing;
+
 using System.Windows.Forms;
 using FreeImageAPI;
 
@@ -15,10 +17,11 @@ namespace PSSGManager {
 
 		public Main() {
 			InitializeComponent();
-			modelView1.InitialiseGraphics();
 		}
 
 		#region MainMenu
+        private bool showAllToggle = true;
+
 		private void openToolStripMenuItem_Click(object sender, EventArgs e) {
 			OpenFileDialog dialog = new OpenFileDialog();
 			dialog.Filter = "PSSG files|*.pssg|All files|*.*";
@@ -29,14 +32,15 @@ namespace PSSGManager {
 				CPSSGFile f = new CPSSGFile(sr.BaseStream);
 				pssgFile = f;
 				treeView.Nodes.Add(createTreeViewNode(f.rootNode));
+                listBoxModels.Items.Clear();
 
-				listBoxModels.Items.Clear();
 				Model[] models = new Model[f.findNodes("MATRIXPALETTEJOINTRENDERINSTANCE").Count];
 				modelView1.renderDataSources = new Dictionary<string,RenderDataSource>();
 
 				int i = 0;
 				List<CNode> mpbnNodes = f.findNodes("MATRIXPALETTEBUNDLENODE");
 				foreach (CNode mpbnNode in mpbnNodes) {
+                    String lod = mpbnNode.attributes["id"].value;
 					List<CNode> mpjnNodes = mpbnNode.findNodes("MATRIXPALETTEJOINTNODE");
 					foreach (CNode mpjnNode in mpjnNodes) {
 						Matrix transform = getTransform((byte[])mpjnNode.subNodes[0].data);
@@ -52,10 +56,11 @@ namespace PSSGManager {
 								modelView1.renderDataSources.Add(rdsNode.attributes["id"].value, renderDataSource);
 							}
 
-							models[i] = new Model(mpjnNode.attributes["id"].ToString() + mpjriNode.attributes["shader"].ToString(), renderDataSource, transform,
+							models[i] = new Model(mpjnNode.attributes["id"].ToString(), lod, renderDataSource, transform,
 								(int)mpjriNode.attributes["streamOffset"].data, (int)mpjriNode.attributes["elementCountFromOffset"].data,
 								(int)mpjriNode.attributes["indexOffset"].data, (int)mpjriNode.attributes["indicesCountFromOffset"].data);
-							listBoxModels.Items.Add(models[i]);
+					
+                            listBoxModels.Items.Add(models[i]);
 							i++;
 						}
 					}
@@ -141,6 +146,8 @@ namespace PSSGManager {
 		#endregion
 
 		#region Models
+
+
 		private RenderDataSource createRenderDataSourceFromNodes(CNode rdsNode, CNode dbNode) {
 			MiscUtil.Conversion.BigEndianBitConverter bc = new MiscUtil.Conversion.BigEndianBitConverter();
 			CustomVertex.PositionNormalColored[] vertices = new CustomVertex.PositionNormalColored[(int)dbNode.attributes["elementCount"].data];
@@ -149,16 +156,18 @@ namespace PSSGManager {
 			int color;
 			Vector3 normal = new Vector3();
 			int vertexCount = 0;
-			for (int i = 0; i < (int)dbNode.attributes["size"].data; i += 28) {
-				pos.X = bc.ToSingle(dbNode.subNodes[3].data, i);
-				pos.Y = bc.ToSingle(dbNode.subNodes[3].data, i + 4);
-				pos.Z = bc.ToSingle(dbNode.subNodes[3].data, i + 8);
+            // TODO: Parse stream nodes properly
+			for (int i = 0; i < (int)dbNode.attributes["size"].data; i += (int)dbNode.subNodes[0].attributes["stride"].data) {
+                CNode dataNode = dbNode.findNodes("DATABLOCKDATA")[0];
+                pos.X = bc.ToSingle(dataNode.data, i);
+                pos.Y = bc.ToSingle(dataNode.data, i + 4);
+                pos.Z = bc.ToSingle(dataNode.data, i + 8);
 
-				color = bc.ToInt32(dbNode.subNodes[3].data, i + 12);
+                color = bc.ToInt32(dataNode.data, i + 12);
 
-				normal.X = bc.ToSingle(dbNode.subNodes[3].data, i + 16);
-				normal.Y = bc.ToSingle(dbNode.subNodes[3].data, i + 20);
-				normal.Z = bc.ToSingle(dbNode.subNodes[3].data, i + 24);
+                normal.X = bc.ToSingle(dataNode.data, i + 16);
+                normal.Y = bc.ToSingle(dataNode.data, i + 20);
+                normal.Z = bc.ToSingle(dataNode.data, i + 24);
 
 				vertices[vertexCount] = new CustomVertex.PositionNormalColored(pos, normal, color);
 				vertexCount++;
@@ -202,8 +211,68 @@ namespace PSSGManager {
 		}
 
 		private void listBoxModels_SelectedIndexChanged(object sender, EventArgs e) {
-			modelView1.RenderModel((Model)listBoxModels.SelectedItem);
+
+            showCheckedModels();
+
+
 		}
+        private void Rotate(float diff)
+        {
+            modelView1.rot += diff;
+            showCheckedModels();
+
+        }
+        private void showCheckedModels()
+        {
+
+            modelView1.device.Clear(ClearFlags.Target | ClearFlags.ZBuffer, Color.White, 1.0f, 0);
+          
+            for (int i = 0; i < listBoxModels.CheckedItems.Count; i++)
+            {
+                modelView1.RenderModel((Model)listBoxModels.CheckedItems[i]);
+                //    modelView1.RenderModel((Model)listBoxModels.SelectedItem);
+            }
+
+            modelView1.device.Present();
+        
+        
+        
+        }
+        private void buttonExportModels_Click(object sender, EventArgs e)
+        {
+            if (listBoxModels.Items.Count > 0)
+            {
+                SaveFileDialog dialog = new SaveFileDialog();
+                dialog.Filter = "OBJ files|*.obj|All files|*.*";
+                dialog.Title = "Select location to save OBJ";
+                if (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    StreamWriter sw = new StreamWriter(dialog.FileName);
+                    int indexOffset = 1;
+                    foreach (Model m in listBoxModels.Items) {
+                        if (m.name.Substring(0, 2) == "x2") continue;
+                        foreach (CustomVertex.PositionNormalColored v in m.getVertices())
+                        {
+                            sw.WriteLine(String.Format("v {0} {1} {2}", v.X + m.transform.M41, v.Y + m.transform.M42, v.Z + m.transform.M43));
+                            sw.WriteLine(String.Format("vn {0} {1} {2}", v.Nx, v.Ny, v.Nz));
+                        }
+                        sw.WriteLine("g " + m.name);
+                        sw.WriteLine("o " + m.name);
+                        for (int i = 0; i < m.getIndices().Length; i += 3)
+                        {
+                            sw.WriteLine(String.Format("f {0}//{0} {1}//{1} {2}//{2}",
+                                m.getIndices()[i] + indexOffset, m.getIndices()[i + 1] + indexOffset, m.getIndices()[i + 2] + indexOffset));
+                        }
+                        indexOffset += m.getVertices().Length;
+                    }
+                    sw.Close();
+                }
+            }
+            else
+            {
+
+            }
+        }
 		#endregion
 
 		#region Textures
@@ -345,11 +414,85 @@ namespace PSSGManager {
 		#endregion
 
 		private void buttonRotateLeft_Click(object sender, EventArgs e) {
-			modelView1.Rotate(-0.1);
+	Rotate(-0.1f);
 		}
 
 		private void buttonRotateRight_Click(object sender, EventArgs e) {
-			modelView1.Rotate(0.1);
+			Rotate(0.1f);
 		}
+
+        private void Main_Load(object sender, EventArgs e)
+        {
+            modelView1.InitialiseGraphics();
+    
+
+              
+         
+
+        }
+
+        private void wireframeToggle_CheckedChanged(object sender, EventArgs e)
+        {
+            CheckBox checkbox = (CheckBox)sender;
+            if (checkbox.Checked)
+            {
+                modelView1.InitialiseGraphics(true);
+
+
+            }
+            else
+            {
+                modelView1.InitialiseGraphics(false);
+
+            }
+            showCheckedModels();
+
+        }
+
+    
+
+     
+
+        private void button1_Click(object sender, EventArgs e)
+        {
+            if (showAllToggle)
+            {
+                for (int x = 0; x < listBoxModels.Items.Count; x++)
+                {
+                    listBoxModels.SetItemChecked(x, true);
+                }
+                showAllToggle = false;
+                button1.Text = "Hide All";
+            }
+            else
+            {
+                for (int x = 0; x < listBoxModels.Items.Count; x++)
+                {
+                    listBoxModels.SetItemChecked(x, false);
+                }
+                showAllToggle = true;
+                button1.Text = "Show All";
+            
+            
+            }
+            
+            showCheckedModels();
+
+        }
+
+        private void Main_ResizeEnd(object sender, EventArgs e)
+        {
+ 
+        }
+
+        private void Main_SizeChanged(object sender, EventArgs e)
+        {
+            modelView1.InitialiseGraphics();
+            showCheckedModels();
+
+        }
+
+
+     
 	}
 }

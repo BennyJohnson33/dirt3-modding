@@ -5,25 +5,29 @@ using System.Text;
 using System.Windows.Forms;
 
 using Microsoft.DirectX;
+using Microsoft.DirectX.DirectInput;
 using Microsoft.DirectX.Direct3D;
 
 namespace PSSGManager {
 	public class ModelView : UserControl {
-		protected Device device = null;
-		private System.Diagnostics.Process process1;
+		public Microsoft.DirectX.Direct3D.Device device = null;
+        private System.Diagnostics.Process process1;
 		public Dictionary<String, RenderDataSource> renderDataSources;
 		private Model model;
 		private VertexBuffer vertexBuffer;
 		private IndexBuffer indexBuffer;
-
-		private double rot = 0;
+		public float rot = 0;
+        private float currentZoom = 8;
 
 		protected bool initialised = false;
 		public bool Initialised {
 			get { return initialised; }
 		}
 
-		public void InitialiseGraphics() {
+     
+		public void InitialiseGraphics(bool wireframe = false) {
+            //Lighting in Initialise
+
 			PresentParameters pp = new PresentParameters();
 			pp.Windowed = true;
 			pp.SwapEffect = SwapEffect.Discard;
@@ -31,37 +35,43 @@ namespace PSSGManager {
 			pp.AutoDepthStencilFormat = DepthFormat.D16;
 			pp.DeviceWindowHandle = this.Handle;
 
-			device = new Device(0, DeviceType.Hardware, this, CreateFlags.HardwareVertexProcessing, pp);
-			//device.RenderState.FillMode = FillMode.WireFrame;
-
+			device = new Microsoft.DirectX.Direct3D.Device(0,Microsoft.DirectX.Direct3D.DeviceType.Hardware, this, CreateFlags.HardwareVertexProcessing, pp);
+            if (wireframe)
+            {
+               	device.RenderState.FillMode = FillMode.WireFrame;
+            }
 			device.DeviceReset += new EventHandler(this.OnDeviceReset);
 
 			OnDeviceReset(device, null);
 
+            float x = (float)Math.Cos(rot);
+            float z = (float)Math.Sin(rot);
+            device.Transform.Projection = Matrix.PerspectiveFovLH((float)Math.PI / 4, this.Width / this.Height, 1f, 50f);
+            device.Transform.View = Matrix.LookAtLH(new Vector3(x, currentZoom, z), new Vector3(0, 0, 0), new Vector3(0, 1, 0));
+            device.RenderState.Lighting = true;
+            device.Lights[0].Type = LightType.Directional;
+            device.Lights[0].Diffuse = Color.White;
+            device.Lights[0].Direction = new Vector3(-x, -6, -z);
+            device.Lights[0].Position = new Vector3(x, 6, z);
+            device.Lights[0].Enabled = true;
 			initialised = true;
 		}
 
 		public void OnDeviceReset(object sender, EventArgs e) {
-			device = sender as Device;
+			device = sender as Microsoft.DirectX.Direct3D.Device;
 		}
 
 		private void Render() {
-			device.Clear(ClearFlags.Target | ClearFlags.ZBuffer, Color.White, 1.0f, 0);
 			device.BeginScene();
 
-			float x = (float)Math.Cos(rot);
-			float z = (float)Math.Sin(rot);
-			device.Transform.Projection = Matrix.PerspectiveFovLH((float)Math.PI / 4, this.Width / this.Height, 1f, 50f);
-			device.Transform.View = Matrix.LookAtLH(new Vector3(x, 6, z), new Vector3(0, 0, 0), new Vector3(0, 1, 0));
-			device.RenderState.Lighting = true;
-			device.Lights[0].Type = LightType.Directional;
-			device.Lights[0].Diffuse = Color.White;
-			device.Lights[0].Direction = new Vector3(-x, -6, -z);
-			device.Lights[0].Position = new Vector3(x, 6, z);
-			device.Lights[0].Enabled = true;
+            float x = (float)Math.Cos(rot);
+	     	float z = (float)Math.Sin(rot);
 
-			device.Transform.World = model.transform;
+        device.Transform.Projection = Matrix.PerspectiveFovLH((float)Math.PI / 4, this.Width / this.Height, 1f, 50f);
 
+                                     
+     device.Transform.View = Matrix.LookAtLH(new Vector3(x,currentZoom, z), new Vector3(0, 0, 0), new Vector3(0, 1, 0));
+            device.Transform.World = model.transform;
 			device.VertexFormat = CustomVertex.PositionNormalColored.Format;
 			device.SetStreamSource(0, vertexBuffer, 0);
 			device.Indices = indexBuffer;
@@ -69,7 +79,6 @@ namespace PSSGManager {
 			device.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, model.getVertices().Length, 0, model.getIndices().Length / 3);
 
 			device.EndScene();
-			device.Present();
 		}
 
 		public void RenderModel(Model model) {
@@ -84,10 +93,7 @@ namespace PSSGManager {
 			Render();
 		}
 
-		public void Rotate(double diff) {
-			rot += diff;
-			Render();
-		}
+	
 
 		protected override void OnPaint(PaintEventArgs e) {
 			if (device == null || model == null) {
@@ -95,7 +101,11 @@ namespace PSSGManager {
 				return;
 			}
 
-			Render();
+
+         
+    
+
+		//	Render();
 		}
 
 		protected override void OnPaintBackground(PaintEventArgs e) {
@@ -103,33 +113,44 @@ namespace PSSGManager {
 
 		protected override void OnSizeChanged(EventArgs e) {
 			Invalidate();
+            InitialiseGraphics();
+
 		}
 
 		private void InitializeComponent() {
-			this.process1 = new System.Diagnostics.Process();
-			this.SuspendLayout();
-			// 
-			// process1
-			// 
-			this.process1.StartInfo.Domain = "";
-			this.process1.StartInfo.LoadUserProfile = false;
-			this.process1.StartInfo.Password = null;
-			this.process1.StartInfo.StandardErrorEncoding = null;
-			this.process1.StartInfo.StandardOutputEncoding = null;
-			this.process1.StartInfo.UserName = "";
-			this.process1.SynchronizingObject = this;
-			// 
-			// ModelView
-			// 
-			this.Name = "ModelView";
-			this.Size = new System.Drawing.Size(458, 302);
-			this.ResumeLayout(false);
+            this.process1 = new System.Diagnostics.Process();
+            this.SuspendLayout();
+            // 
+            // process1
+            // 
+            this.process1.StartInfo.Domain = "";
+            this.process1.StartInfo.LoadUserProfile = false;
+            this.process1.StartInfo.Password = null;
+            this.process1.StartInfo.StandardErrorEncoding = null;
+            this.process1.StartInfo.StandardOutputEncoding = null;
+            this.process1.StartInfo.UserName = "";
+            this.process1.SynchronizingObject = this;
+            // 
+            // ModelView
+            // 
+            this.Name = "ModelView";
+            this.Size = new System.Drawing.Size(458, 302);
+            this.Load += new System.EventHandler(this.ModelView_Load);
+            this.ResumeLayout(false);
+
+
 
 		}
+
+        private void ModelView_Load(object sender, EventArgs e)
+        {
+
+        }
 	}
 
 	public class Model {
 		public string name;
+        public string lod;
 		public RenderDataSource renderDataSource;
 
 		public Matrix transform;
@@ -141,8 +162,9 @@ namespace PSSGManager {
 
 		public string blah;
 
-		public Model(string name, RenderDataSource renderDataSource, Matrix transform, int streamOffset, int elementCount, int indexOffset, int indicesCount) {
+		public Model(string name, string lod, RenderDataSource renderDataSource, Matrix transform, int streamOffset, int elementCount, int indexOffset, int indicesCount) {
 			this.name = name;
+            this.lod = lod;
 			this.renderDataSource = renderDataSource;
 			this.transform = transform;
 			this.streamOffset = streamOffset; // Unsure what these are for, vertex stream should not be split up!
@@ -162,7 +184,7 @@ namespace PSSGManager {
 		}
 
 		public override string ToString() {
-			return name;
+			return lod + name;
 		}
 	}
 
